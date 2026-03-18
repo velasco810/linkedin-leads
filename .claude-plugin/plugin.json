@@ -1,0 +1,11 @@
+{
+  "name": "linkedin-leads",
+  "description": "Scrape LinkedIn connections and search results, then rank leads with AI analysis",
+  "version": "1.0.0",
+  "author": {
+    "name": "Eduardo Velasco"
+  },
+  "repository": "https://github.com/velasco810/linkedin-leads",
+  "license": "MIT",
+  "keywords": ["linkedin", "leads", "sales", "prospecting", "ai"]
+}

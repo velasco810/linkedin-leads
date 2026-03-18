@@ -1,0 +1,26 @@
+{
+  "name": "linkedin-leads",
+  "version": "1.0.0",
+  "description": "Claude Code plugin to scrape LinkedIn connections/search results and rank leads with AI",
+  "main": "scrape-connections.js",
+  "scripts": {
+    "scrape": "node scrape-connections.js",
+    "postinstall": "npx playwright install chromium"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "linkedin",
+    "leads",
+    "sales",
+    "prospecting",
+    "claude-code",
+    "plugin"
+  ],
+  "author": "Eduardo Velasco",
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}
