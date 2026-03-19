@@ -285,9 +285,9 @@ function extractConnections() {
  * Scrape connections page using infinite scroll.
  * @param {import('playwright').Page} page
  * @param {Map} allResults - Accumulated results map (profileUrl -> profile)
- * @param {Function} onProgress - Progress callback
+ * @param {Object} tracker - Progress tracker from createProgressTracker
  */
-async function scrapeWithInfiniteScroll(page, allResults, onProgress) {
+async function scrapeWithInfiniteScroll(page, allResults, tracker) {
   let staleRounds = 0;
   let scrollPosition = 0;
 
@@ -296,6 +296,7 @@ async function scrapeWithInfiniteScroll(page, allResults, onProgress) {
     let newCount = 0;
 
     for (const profile of visible) {
+      if (!profile.profileUrl || !profile.profileUrl.includes('linkedin.com/in/')) continue;
       if (!allResults.has(profile.profileUrl)) {
         allResults.set(profile.profileUrl, {
           name: profile.name,
@@ -310,7 +311,8 @@ async function scrapeWithInfiniteScroll(page, allResults, onProgress) {
       staleRounds++;
     } else {
       staleRounds = 0;
-      console.log(`  ${allResults.size} profiles (+${newCount} new)`);
+      const elapsed = formatDuration(tracker.elapsedSeconds());
+      console.log(`  ${allResults.size} profiles (+${newCount} new) | ${elapsed} elapsed`);
     }
 
     // Scroll down
@@ -332,7 +334,7 @@ async function scrapeWithInfiniteScroll(page, allResults, onProgress) {
       await page.waitForTimeout(INTER_PAGE_DELAY_MS);
     }
 
-    onProgress(allResults);
+    tracker.save(allResults);
   }
 }
 
@@ -340,14 +342,26 @@ async function scrapeWithInfiniteScroll(page, allResults, onProgress) {
  * Scrape search results using pagination.
  * @param {import('playwright').Page} page
  * @param {Map} allResults - Accumulated results map (profileUrl -> profile)
- * @param {Function} onProgress - Progress callback
+ * @param {Object} tracker - Progress tracker from createProgressTracker
  */
-async function scrapeWithPagination(page, allResults, onProgress) {
+async function scrapeWithPagination(page, allResults, tracker) {
   let pageNum = 1;
   let consecutiveEmpty = 0;
 
   while (consecutiveEmpty < MAX_CONSECUTIVE_EMPTY_PAGES) {
-    console.log(`  Page ${pageNum}...`);
+    // Detect total pages from pagination bar (re-check each page since LinkedIn updates it)
+    const totalPages = await page.evaluate(() => {
+      const pageButtons = document.querySelectorAll('button[aria-label^="Page"]');
+      let max = 0;
+      for (const btn of pageButtons) {
+        const num = parseInt(btn.textContent.trim(), 10);
+        if (num > max) max = num;
+      }
+      return max || null;
+    });
+
+    const pageLabel = totalPages ? `Page ${pageNum} of ${totalPages}` : `Page ${pageNum}`;
+    console.log(`  ${pageLabel}...`);
 
     // Scroll to bottom to render all results on this page
     await autoScroll(page);
@@ -356,6 +370,7 @@ async function scrapeWithPagination(page, allResults, onProgress) {
     let newCount = 0;
 
     for (const profile of visible) {
+      if (!profile.profileUrl || !profile.profileUrl.includes('linkedin.com/in/')) continue;
       if (!allResults.has(profile.profileUrl)) {
         allResults.set(profile.profileUrl, {
           name: profile.name,
@@ -371,10 +386,11 @@ async function scrapeWithPagination(page, allResults, onProgress) {
       consecutiveEmpty++;
     } else {
       consecutiveEmpty = 0;
-      console.log(`  ${allResults.size} profiles (+${newCount} new from page ${pageNum})`);
+      const elapsed = formatDuration(tracker.elapsedSeconds());
+      console.log(`  ${allResults.size} profiles (+${newCount} new) | ${elapsed} elapsed`);
     }
 
-    onProgress(allResults);
+    tracker.save(allResults, { currentPage: pageNum, totalPages });
 
     // Navigate to next page
     const hasNext = await page.evaluate(() => {
@@ -420,21 +436,100 @@ async function autoScroll(page) {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a progress-saving callback that writes to disk every N new results.
- * @param {string} outputFile - Path to write JSON
- * @returns {Function} Callback accepting the results Map
+ * Format seconds into a human-readable duration string.
+ * @param {number} seconds
+ * @returns {string} e.g. "4m12s" or "52s"
  */
-function createProgressSaver(outputFile) {
+function formatDuration(seconds) {
+  const s = Math.round(seconds);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m${s % 60}s`;
+}
+
+/**
+ * Create a progress tracker that saves data, writes progress.json, and computes rates.
+ * @param {string} outputFile - Path to write profile JSON
+ * @param {string} outputDir - Directory for progress.json
+ * @param {string} mode - "connections" or "search"
+ * @returns {Object} Tracker with save, writeCompletion, writeError, ratePerMinute, formatEta
+ */
+function createProgressTracker(outputFile, outputDir, mode) {
+  const startTime = Date.now();
+  const startedAt = new Date().toISOString();
+  const progressFile = path.join(outputDir, 'progress.json');
   let lastSavedSize = 0;
 
-  return function saveProgress(allResults) {
+  function elapsedSeconds() {
+    return (Date.now() - startTime) / 1000;
+  }
+
+  function ratePerMinute(count) {
+    const elapsed = elapsedSeconds();
+    if (elapsed < 1) return 0;
+    return Math.round(count / (elapsed / 60));
+  }
+
+  function formatEta(seconds) {
+    return formatDuration(seconds);
+  }
+
+  function writeProgress(allResults, extra = {}) {
+    const count = allResults.size;
+    const elapsed = elapsedSeconds();
+    const rate = ratePerMinute(count);
+
+    const progress = {
+      status: 'running',
+      startedAt,
+      updatedAt: new Date().toISOString(),
+      profileCount: count,
+      ratePerMinute: rate,
+      elapsedSeconds: Math.round(elapsed),
+      mode,
+      ...extra,
+    };
+
+    fs.writeFileSync(progressFile, JSON.stringify(progress, null, 2));
+  }
+
+  function save(allResults, extra = {}) {
     if (allResults.size - lastSavedSize >= PROGRESS_SAVE_INTERVAL) {
       const data = [...allResults.values()];
       fs.writeFileSync(outputFile, JSON.stringify(data, null, 2));
-      console.log(`  (progress saved: ${data.length} profiles)`);
+      console.log(`  (saved: ${data.length} profiles)`);
       lastSavedSize = allResults.size;
     }
-  };
+    writeProgress(allResults, extra);
+  }
+
+  function writeCompletion(allResults) {
+    const elapsed = elapsedSeconds();
+    const progress = {
+      status: 'complete',
+      startedAt,
+      completedAt: new Date().toISOString(),
+      profileCount: allResults.size,
+      ratePerMinute: ratePerMinute(allResults.size),
+      elapsedSeconds: Math.round(elapsed),
+      totalElapsedFormatted: formatDuration(elapsed),
+      mode,
+    };
+    fs.writeFileSync(progressFile, JSON.stringify(progress, null, 2));
+  }
+
+  function writeError(error) {
+    const progress = {
+      status: 'error',
+      startedAt,
+      updatedAt: new Date().toISOString(),
+      elapsedSeconds: Math.round(elapsedSeconds()),
+      mode,
+      error: error.message,
+    };
+    fs.writeFileSync(progressFile, JSON.stringify(progress, null, 2));
+  }
+
+  return { save, writeCompletion, writeError, ratePerMinute, formatEta, elapsedSeconds, startTime };
 }
 
 /**
@@ -471,18 +566,21 @@ async function saveDebugHTML(page, outputDir, type) {
 }
 
 /**
- * Write final results, metadata, and screenshot.
+ * Write final results, metadata, screenshot, and completion progress.
  * @param {Map} allResults
  * @param {Object} opts - CLI options
  * @param {string} outputDir
  * @param {string} outputFile
  * @param {import('playwright').Page} page
+ * @param {Object} tracker - Progress tracker
  */
-async function writeFinalOutput(allResults, opts, outputDir, outputFile, page) {
+async function writeFinalOutput(allResults, opts, outputDir, outputFile, page, tracker) {
   const results = [...allResults.values()];
+  const elapsed = tracker.elapsedSeconds();
 
   fs.writeFileSync(outputFile, JSON.stringify(results, null, 2));
-  console.log(`\nDone! Extracted ${results.length} unique profiles.`);
+  console.log(`\nDone! Extracted ${results.length} unique profiles in ${formatDuration(elapsed)}.`);
+  console.log(`Rate: ${tracker.ratePerMinute(results.length)} profiles/min`);
   console.log(`Saved to ${outputFile}`);
 
   const meta = {
@@ -491,10 +589,18 @@ async function writeFinalOutput(allResults, opts, outputDir, outputFile, page) {
     url: opts.url,
     scrapedAt: new Date().toISOString(),
     count: results.length,
+    elapsedSeconds: Math.round(elapsed),
+    ratePerMinute: tracker.ratePerMinute(results.length),
   };
   fs.writeFileSync(path.join(outputDir, 'meta.json'), JSON.stringify(meta, null, 2));
 
-  await page.screenshot({ path: path.join(outputDir, `${opts.type}-final-state.png`) });
+  tracker.writeCompletion(allResults);
+
+  try {
+    await page.screenshot({ path: path.join(outputDir, `${opts.type}-final-state.png`) });
+  } catch (e) {
+    console.warn(`Warning: Could not save screenshot: ${e.message}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -540,6 +646,7 @@ async function main() {
   const opts = parseArgs();
   const outputDir = path.join(OUTPUT_BASE_DIR, opts.name);
   const outputFile = path.join(outputDir, opts.output);
+  const progressFile = path.join(outputDir, 'progress.json');
 
   console.log(`Person:  ${opts.name}`);
   console.log(`Mode:    ${opts.type}`);
@@ -549,6 +656,20 @@ async function main() {
 
   fs.mkdirSync(outputDir, { recursive: true });
 
+  // Handle Ctrl+C gracefully — write interrupted status
+  process.on('SIGINT', () => {
+    console.log('\n\nInterrupted. Saving progress...');
+    try {
+      if (fs.existsSync(outputDir)) {
+        fs.writeFileSync(progressFile, JSON.stringify({
+          status: 'interrupted',
+          updatedAt: new Date().toISOString(),
+        }, null, 2));
+      }
+    } catch { /* best effort */ }
+    process.exit(0);
+  });
+
   const { browser, page } = await launchBrowser(opts);
 
   try {
@@ -556,15 +677,15 @@ async function main() {
     console.log('Card HTML saved for debugging.');
 
     const allResults = new Map();
-    const onProgress = createProgressSaver(outputFile);
+    const tracker = createProgressTracker(outputFile, outputDir, opts.type);
 
     if (opts.type === 'search') {
-      await scrapeWithPagination(page, allResults, onProgress);
+      await scrapeWithPagination(page, allResults, tracker);
     } else {
-      await scrapeWithInfiniteScroll(page, allResults, onProgress);
+      await scrapeWithInfiniteScroll(page, allResults, tracker);
     }
 
-    await writeFinalOutput(allResults, opts, outputDir, outputFile, page);
+    await writeFinalOutput(allResults, opts, outputDir, outputFile, page, tracker);
 
     if (opts.keepOpen) {
       console.log('Browser will stay open. Press Ctrl+C to exit.');

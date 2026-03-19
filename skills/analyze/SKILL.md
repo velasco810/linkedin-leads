@@ -34,15 +34,40 @@ Also read `meta.json` for context (who was scraped, when, source URL).
 
 4. **Natural language reasoning**: Do NOT use keyword matching, regex filters, or static rules to score profiles. Read each profile's name and headline as a human would, and use your judgment about whether they fit the criteria.
 
+## Error Handling
+
+- If `output/$0/` does not exist, tell the user: "No data found for $0. Run `/linkedin-leads:scrape $0 <type> <url>` first."
+- If the data file exists but is empty or contains no profiles, report: "Data file for $0 is empty (0 profiles). Try re-scraping."
+- If `meta.json` is missing, proceed without it — the data file is sufficient.
+
 ## Analysis Process
 
 ### Step 1: Load and report
 
 Read the data file. Report: "Found X profiles for [person] scraped on [date]."
 
+### Step 1.5: Estimate and report
+
+Before launching agents, calculate and display an estimate for the user:
+
+- **Batch size**: ~175 profiles per batch
+- **Number of batches**: ceil(profile_count / 175)
+- **Number of agents**: min(batch_count, 3) per wave; if more than 3 batches, multiple waves
+- **Estimated input tokens**: batches × (175 × 45 tokens/profile + 800 tokens system prompt)
+- **Estimated output tokens**: agents × 1,500 tokens + 4,000 tokens for merge
+- **Estimated time**: 45-90 seconds per wave (agents run in parallel)
+
+Display to the user:
+
+> **Analysis plan:** [X] profiles → [N] batches across [M] agents
+> **Estimated tokens:** ~[T]K input, ~[O]K output
+> **Estimated time:** [E] seconds
+
 ### Step 2: Batch and analyze
 
-Split profiles into batches of ~150-200 and launch 2-3 parallel agents. Each agent receives:
+Split profiles into batches of ~175. Launch agents in waves of up to 3 parallel agents.
+
+Each agent receives:
 
 - The batch of profiles (as JSON)
 - The user's ranking criteria
@@ -66,14 +91,29 @@ Split profiles into batches of ~150-200 and launch 2-3 parallel agents. Each age
 > ```
 >
 > Be selective. Only include people who genuinely fit. Returning 5 great matches is better than 15 mediocre ones.
+>
+> End your response with a stats line: "Reviewed [N] profiles. Selected [M] candidates. Top pick: [name] — [reason]."
 
-### Step 3: Merge and rank
+**Between waves** (if more than 3 batches), report:
+
+> **Wave 1/2 complete:** [M] candidates from [N] profiles ([B] batches). Starting wave 2...
+
+### Step 3: Merge, rank, and report
 
 Collect results from all agents. Deduplicate by profileUrl. Re-rank the combined candidates into a final top 30, assigning tiers:
 
 - **Tier 1** (ranks 1-12): Strongest fit — these people should be contacted first
 - **Tier 2** (ranks 13-22): Strong fit — worth pursuing after Tier 1
 - **Tier 3** (ranks 23-30): Adjacent or worth exploring — may need qualification
+
+After ranking, display a completion summary:
+
+> **Analysis complete**
+> - Profiles reviewed: [total]
+> - Candidates surfaced by agents: [count]
+> - Final top 30 selected
+> - Agents used: [count] ([waves] wave(s))
+> - Estimated token usage: ~[T]K input, ~[O]K output
 
 ## Output
 

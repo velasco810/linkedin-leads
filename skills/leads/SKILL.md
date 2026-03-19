@@ -39,13 +39,27 @@ If no data exists, proceed to scraping.
 
 ### Step 3: Scrape (if needed)
 
+Before invoking the scraper, set expectations:
+
+> **Starting scrape** of [person]'s [connections/search results]
+> - A Chromium browser window will open (this is expected)
+> - Typical scrape time: 10-15 minutes depending on connection count (one-time — you won't need to re-scrape to run different analyses)
+> - You'll see real-time progress in the terminal
+
 Invoke the scrape skill:
 
 ```
 /linkedin-leads:scrape <person> <type> <url>
 ```
 
-Wait for it to complete. The scraper opens a visible browser window — let the user know this is expected.
+Wait for it to complete.
+
+### Step 3.5: Post-scrape report
+
+After scraping completes, read `${CLAUDE_SKILL_DIR}/../../output/<person>/progress.json` and display:
+
+> **Scrape complete:** [count] profiles in [duration] ([rate] profiles/min)
+> Starting analysis phase...
 
 ### Step 4: Analyze
 
@@ -57,9 +71,15 @@ Invoke the analyze skill with the user's criteria:
 
 ### Step 5: Summary
 
-After analysis completes, provide a brief wrap-up:
-- Total profiles analyzed
-- Number in each tier
+After analysis completes, provide a final wrap-up with timing and cost:
+
+> **Pipeline complete**
+> - Scrape: [count] profiles in [duration]
+> - Analysis: [agent_count] agents, ~[tokens]K tokens, [duration]
+> - Total wall time: ~[total]
+> - Results: [tier1_count] Tier 1 / [tier2_count] Tier 2 / [tier3_count] Tier 3
+
+Then:
 - Top 5 names and why they stand out
 - File locations for the full ranked list
 - Offer to format results for WhatsApp, email, or CSV if the user wants to share them
