@@ -19,8 +19,8 @@ Give it a LinkedIn URL and describe what you're looking for in plain English. It
 ## Installation
 
 ```bash
-git clone https://github.com/velasco810/linkedin.git
-cd linkedin
+git clone https://github.com/velasco810/claude-code-linkedin.git
+cd claude-code-linkedin
 npm install
 ```
 

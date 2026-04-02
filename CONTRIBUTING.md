@@ -3,8 +3,8 @@
 ## Development Setup
 
 ```bash
-git clone https://github.com/velasco810/linkedin.git
-cd linkedin
+git clone https://github.com/velasco810/claude-code-linkedin.git
+cd claude-code-linkedin
 npm install
 claude --plugin-dir .
 ```
