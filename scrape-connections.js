@@ -47,6 +47,13 @@ const MAX_CONSECUTIVE_EMPTY_PAGES = 3;
 const BROWSER_DATA_DIR = path.join(__dirname, '.browser-data');
 const OUTPUT_BASE_DIR = path.join(__dirname, 'output');
 
+const SELECTORS = {
+  profileLink: 'a[href*="/in/"]',
+  searchCard: 'div[role="listitem"]',
+  pageButton: 'button[aria-label^="Page"]',
+  nextButton: 'button[aria-label="Next"]',
+};
+
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
@@ -137,6 +144,11 @@ function parseArgs() {
     process.exit(1);
   }
 
+  if (!/^[a-zA-Z0-9_-]+$/.test(opts.name)) {
+    console.error('Error: --name must contain only letters, numbers, hyphens, and underscores.');
+    process.exit(1);
+  }
+
   if (!VALID_TYPES.includes(opts.type)) {
     console.error(`Error: --type must be one of: ${VALID_TYPES.join(', ')} (got "${opts.type}")`);
     process.exit(1);
@@ -149,6 +161,11 @@ function parseArgs() {
 
   opts.url = opts.url || DEFAULT_URLS[opts.type];
   opts.output = opts.output || DEFAULT_OUTPUT_FILES[opts.type];
+
+  if (!opts.url.startsWith('https://www.linkedin.com/')) {
+    console.error('Error: --url must be a LinkedIn URL (https://www.linkedin.com/...)');
+    process.exit(1);
+  }
 
   return opts;
 }
@@ -278,6 +295,17 @@ function extractConnections() {
 }
 
 // ---------------------------------------------------------------------------
+// Profile Deduplication
+// ---------------------------------------------------------------------------
+
+function addProfile(profile, allResults) {
+  if (!profile.profileUrl?.includes('linkedin.com/in/')) return false;
+  if (allResults.has(profile.profileUrl)) return false;
+  allResults.set(profile.profileUrl, profile);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Scraping Strategies
 // ---------------------------------------------------------------------------
 
@@ -293,19 +321,7 @@ async function scrapeWithInfiniteScroll(page, allResults, tracker) {
 
   while (staleRounds < STALE_ROUNDS_LIMIT) {
     const visible = await page.evaluate(extractConnections);
-    let newCount = 0;
-
-    for (const profile of visible) {
-      if (!profile.profileUrl || !profile.profileUrl.includes('linkedin.com/in/')) continue;
-      if (!allResults.has(profile.profileUrl)) {
-        allResults.set(profile.profileUrl, {
-          name: profile.name,
-          headline: profile.headline,
-          profileUrl: profile.profileUrl,
-        });
-        newCount++;
-      }
-    }
+    const newCount = visible.filter(p => addProfile(p, allResults)).length;
 
     if (newCount === 0) {
       staleRounds++;
@@ -363,24 +379,11 @@ async function scrapeWithPagination(page, allResults, tracker) {
     const pageLabel = totalPages ? `Page ${pageNum} of ${totalPages}` : `Page ${pageNum}`;
     console.log(`  ${pageLabel}...`);
 
-    // Scroll to bottom to render all results on this page
-    await autoScroll(page);
+    // Scroll to bottom to render all results on this page (faster for search pages)
+    await autoScroll(page, 400, 300);
 
     const visible = await page.evaluate(extractSearchResults);
-    let newCount = 0;
-
-    for (const profile of visible) {
-      if (!profile.profileUrl || !profile.profileUrl.includes('linkedin.com/in/')) continue;
-      if (!allResults.has(profile.profileUrl)) {
-        allResults.set(profile.profileUrl, {
-          name: profile.name,
-          headline: profile.headline,
-          location: profile.location,
-          profileUrl: profile.profileUrl,
-        });
-        newCount++;
-      }
-    }
+    const newCount = visible.filter(p => addProfile(p, allResults)).length;
 
     if (newCount === 0) {
       consecutiveEmpty++;
@@ -410,7 +413,7 @@ async function scrapeWithPagination(page, allResults, tracker) {
 
     pageNum++;
     await page.waitForTimeout(INTER_PAGE_DELAY_MS);
-    await page.waitForSelector('a[href*="/in/"]', { timeout: SELECTOR_TIMEOUT_MS }).catch(() => {});
+    await page.waitForSelector(SELECTORS.profileLink, { timeout: SELECTOR_TIMEOUT_MS }).catch(() => {});
   }
 }
 
@@ -418,16 +421,14 @@ async function scrapeWithPagination(page, allResults, tracker) {
  * Scroll to bottom of page to trigger lazy-loaded content.
  * @param {import('playwright').Page} page
  */
-async function autoScroll(page) {
-  await page.evaluate(async () => {
-    const step = 400;
-    const delay = 300;
+async function autoScroll(page, step = SCROLL_STEP_PX, delay = SCROLL_DELAY_MS) {
+  await page.evaluate(async ({ step, delay }) => {
     const maxHeight = document.body.scrollHeight;
     for (let pos = 0; pos < maxHeight; pos += step) {
       window.scrollTo({ top: pos, behavior: 'smooth' });
       await new Promise(r => setTimeout(r, delay));
     }
-  });
+  }, { step, delay });
   await page.waitForTimeout(500);
 }
 
@@ -628,10 +629,10 @@ async function launchBrowser(opts) {
 
   // Check if profile links are visible (indicates we're logged in)
   try {
-    await page.waitForSelector('a[href*="/in/"]', { timeout: SELECTOR_TIMEOUT_MS });
+    await page.waitForSelector(SELECTORS.profileLink, { timeout: SELECTOR_TIMEOUT_MS });
   } catch {
     console.log('\n=== Please log in to LinkedIn in the browser window ===\n');
-    await page.waitForSelector('a[href*="/in/"]', { timeout: opts.timeout * 1000 });
+    await page.waitForSelector(SELECTORS.profileLink, { timeout: opts.timeout * 1000 });
     await page.waitForTimeout(3000);
   }
 
@@ -656,8 +657,9 @@ async function main() {
 
   fs.mkdirSync(outputDir, { recursive: true });
 
-  // Handle Ctrl+C gracefully — write interrupted status
-  process.on('SIGINT', () => {
+  let activeBrowser = null;
+
+  process.on('SIGINT', async () => {
     console.log('\n\nInterrupted. Saving progress...');
     try {
       if (fs.existsSync(outputDir)) {
@@ -666,11 +668,13 @@ async function main() {
           updatedAt: new Date().toISOString(),
         }, null, 2));
       }
+      if (activeBrowser) await activeBrowser.close();
     } catch { /* best effort */ }
-    process.exit(0);
+    process.exit(1);
   });
 
   const { browser, page } = await launchBrowser(opts);
+  activeBrowser = browser;
 
   try {
     await saveDebugHTML(page, outputDir, opts.type);

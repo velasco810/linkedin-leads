@@ -1,8 +1,14 @@
-# linkedin-leads
+# linkedin
 
-A [Claude Code](https://claude.com/claude-code) plugin that scrapes LinkedIn connections and search results, then uses AI to rank and tier the best leads based on your criteria.
+A [Claude Code](https://claude.com/claude-code) plugin that scrapes LinkedIn connections and search results, then uses AI to rank and tier the best matches based on your criteria.
 
-Give it a LinkedIn URL and describe who you're looking for in plain English. It scrapes the profiles, reads every headline, and returns a ranked top-30 list organized into tiers — with LinkedIn URLs you can click through.
+Three built-in workflows:
+
+- **`/linkedin:leads`** — Find sales prospects matching your ideal customer profile
+- **`/linkedin:advisors`** — Find advisory board candidates based on expertise gaps
+- **`/linkedin:vcs`** — Find investors that fit your raise
+
+Give it a LinkedIn URL and describe what you're looking for in plain English. It scrapes the profiles, reads every headline, and returns a ranked top-30 list organized into tiers.
 
 ## Prerequisites
 
@@ -13,8 +19,8 @@ Give it a LinkedIn URL and describe who you're looking for in plain English. It 
 ## Installation
 
 ```bash
-git clone https://github.com/velasco810/linkedin-leads.git
-cd linkedin-leads
+git clone https://github.com/velasco810/linkedin.git
+cd linkedin
 npm install
 ```
 
@@ -23,7 +29,7 @@ This installs [Playwright](https://playwright.dev/) and downloads Chromium autom
 ### Load the plugin in Claude Code
 
 ```bash
-claude --plugin-dir ./linkedin-leads
+claude --plugin-dir /path/to/linkedin
 ```
 
 Or from inside the repo:
@@ -34,25 +40,53 @@ claude --plugin-dir .
 
 ## Quick Start
 
-The fastest way to get going:
+From a Claude Code session with the plugin loaded:
 
 ```
-/linkedin-leads:leads
+/linkedin:leads
 ```
 
-This walks you through the full workflow interactively — it'll ask for the LinkedIn URL, what kind of leads you want, then scrape and rank them.
+This walks you through the full workflow interactively — it asks for the LinkedIn URL, what kind of leads you want, then scrapes and ranks them.
 
 ## Skills
 
-### `/linkedin-leads:scrape`
+### `/linkedin:leads`
 
-Scrape LinkedIn profiles into a local JSON file.
+Find and rank sales leads based on your ideal customer profile.
 
 ```
-/linkedin-leads:scrape <person> <connections|search> [linkedin-url]
+/linkedin:leads CISOs at AI-native SaaS companies
 ```
 
-**Arguments:**
+Asks for: target person's name, LinkedIn URL, scrape type, and ICP description.
+
+### `/linkedin:advisors`
+
+Find and rank advisory board candidates based on expertise gaps and company stage.
+
+```
+/linkedin:advisors enterprise sales leadership for a Series A AI security startup
+```
+
+Asks for: target person's name, LinkedIn URL, scrape type, expertise gaps, and company stage.
+
+### `/linkedin:vcs`
+
+Find and rank VC investors that fit your raise.
+
+```
+/linkedin:vcs Seed round, $3M, AI security — hands-on operator VCs
+```
+
+Asks for: target person's name, LinkedIn URL, scrape type, raise details, and investor preferences.
+
+### `/linkedin:scrape`
+
+Scrape LinkedIn profiles into a local JSON file. Used internally by the workflow skills, but can be run standalone.
+
+```
+/linkedin:scrape <person> <connections|search> [linkedin-url]
+```
 
 | Arg | Description |
 |-----|-------------|
@@ -64,56 +98,35 @@ Scrape LinkedIn profiles into a local JSON file.
 **Examples:**
 
 ```
-# Scrape your own connections
-/linkedin-leads:scrape eduardo connections
-
-# Scrape a search results page for someone's network
-/linkedin-leads:scrape aum search "https://www.linkedin.com/search/results/people/?connectionOf=..."
+/linkedin:scrape eduardo connections
+/linkedin:scrape aum search "https://www.linkedin.com/search/results/people/?connectionOf=..."
 ```
 
 **Output:** `output/<person>/connections.json` or `output/<person>/search-results.json`
 
-### `/linkedin-leads:analyze`
+### `/linkedin:analyze`
 
-Rank and tier scraped profiles using AI analysis.
+Rank and tier scraped profiles using AI analysis. Used internally by the workflow skills, but can be run standalone.
 
 ```
-/linkedin-leads:analyze <person> <criteria>
+/linkedin:analyze <person> <criteria> [leads|advisors|vcs]
 ```
-
-**Arguments:**
 
 | Arg | Description |
 |-----|-------------|
 | `person` | Matches the folder name from scraping |
 | `criteria` | Plain English description of who you're looking for |
+| `mode` | `leads` (default), `advisors`, or `vcs` — changes the AI's evaluation lens |
 
-**Examples:**
-
-```
-/linkedin-leads:analyze aum "CISOs and security leaders at AI-native tech companies with external-facing AI"
-
-/linkedin-leads:analyze eduardo "CROs, VPs of Sales, and RevOps leaders at companies with 50+ sellers"
-
-/linkedin-leads:analyze aum "Heads of Data and VPs of Engineering at mid-size fintech startups"
-```
-
-**How it works:** Claude reads every profile and uses natural language reasoning to assess fit — no keyword matching or regex. It thinks like a sales strategist, considering role, company type, seniority, and context.
+Each mode uses a different agent persona:
+- **leads** — thinks like a sales strategist (decision-makers, budget-holders, champions)
+- **advisors** — thinks like an executive talent scout (domain expertise, operator experience, board track record)
+- **vcs** — thinks like a fundraising strategist (stage fit, thesis alignment, value-add potential)
 
 **Output:**
 - Tiered table displayed in the terminal
-- `output/<person>/ranked-leads.json` — Full ranked list as JSON
-- `output/<person>/top-30.csv` — CSV for sharing
-
-### `/linkedin-leads:leads`
-
-Interactive end-to-end workflow that combines scraping and analysis.
-
-```
-/linkedin-leads:leads I need CISOs at AI companies from Aum's network
-```
-
-Walks you through: gathering URLs → checking for existing data → scraping → ranking → summary.
+- `output/<person>/ranked-{mode}.json` — Full ranked list as JSON
+- `output/<person>/top-30-{mode}.csv` — CSV for sharing
 
 ## Standalone Scraper
 
@@ -127,9 +140,9 @@ Run `node scrape-connections.js --help` for all options:
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--name` | Person label (required) | — |
+| `--name` | Person label (required, alphanumeric/hyphens/underscores only) | — |
 | `--type` | `connections` or `search` | `connections` |
-| `--url` | LinkedIn URL | Type-specific default |
+| `--url` | LinkedIn URL (must be `https://www.linkedin.com/...`) | Type-specific default |
 | `--output` | Output filename | `connections.json` / `search-results.json` |
 | `--headless` | Run browser without UI | `false` |
 | `--timeout` | Login wait in seconds | `300` |
@@ -150,7 +163,7 @@ Run `node scrape-connections.js --help` for all options:
 
 `location` is only present for search results; connections don't include it.
 
-### Ranked Leads JSON
+### Ranked Results JSON
 
 ```json
 {
@@ -181,9 +194,9 @@ Each scrape saves `meta.json`:
 
 1. **Scraping** — Uses [Playwright](https://playwright.dev/) to automate a real Chromium browser. It opens visibly (not headless) because LinkedIn detects headless browsers. On first run, you log in manually; the session persists in `.browser-data/` for future runs.
 
-2. **Analysis** — Claude Code agents read every profile's name and headline, then reason about fit against your criteria using natural language. No keyword matching or scoring scripts — the AI uses judgment, just like a human SDR reviewing a list.
+2. **Analysis** — Claude Code agents read every profile's name and headline, then reason about fit against your criteria using natural language. No keyword matching or scoring scripts — the AI uses judgment, just like a human reviewing a list. The agent persona changes based on mode (sales strategist, talent scout, or fundraising strategist).
 
-3. **Output** — Results are ranked into three tiers (Top Priority, Strong Matches, Worth Exploring) with a one-line reason for each. Saved as both JSON and CSV.
+3. **Output** — Results are ranked into three tiers with mode-specific labels and a one-line reason for each. Saved as both JSON and CSV.
 
 ## License
 

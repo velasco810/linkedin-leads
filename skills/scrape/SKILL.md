@@ -45,4 +45,4 @@ Report:
 4. **Suggest next step**:
 
 > To analyze and rank these profiles, run:
-> `/linkedin-leads:analyze $0 "<your ranking criteria>"`
+> `/linkedin:analyze $0 "<your ranking criteria>"`

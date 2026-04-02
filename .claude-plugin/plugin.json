@@ -1,11 +1,11 @@
 {
-  "name": "linkedin-leads",
-  "description": "Scrape LinkedIn connections and search results, then rank leads with AI analysis",
-  "version": "1.0.0",
+  "name": "linkedin",
+  "description": "Scrape LinkedIn connections and search results, then rank leads, advisors, or investors with AI analysis",
+  "version": "2.0.0",
   "author": {
     "name": "Eduardo Velasco"
   },
-  "repository": "https://github.com/velasco810/linkedin-leads",
+  "repository": "https://github.com/velasco810/linkedin",
   "license": "MIT",
-  "keywords": ["linkedin", "leads", "sales", "prospecting", "ai"]
+  "keywords": ["linkedin", "leads", "advisors", "vcs", "sales", "prospecting", "ai"]
 }

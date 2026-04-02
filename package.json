@@ -1,5 +1,5 @@
 {
-  "name": "linkedin-leads",
+  "name": "linkedin",
   "version": "1.0.0",
   "description": "Claude Code plugin to scrape LinkedIn connections/search results and rank leads with AI",
   "main": "scrape-connections.js",
